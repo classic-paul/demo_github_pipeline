@@ -11,6 +11,7 @@
    - Add required reviewers on `pre` and `prod`.
    - Optionally add variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (without them, Azure login is skipped).
 3. Tag a release: `git tag v1.0.0 && git push --tags`.
+   The Create deployment release workflow creates a GitHub Release with `demo-deployment-<tag>.tar.gz`, containing the environment configs. To recreate the asset for an existing tag, run that workflow from the tag in Actions.
 
 ## Demo
 
