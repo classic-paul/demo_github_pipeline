@@ -1,0 +1,93 @@
+name: Terraform Deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce deployment rules
+        run: |
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Ref:         ${{ github.ref }} (${{ github.ref_type }})"
+          if [ "${{ inputs.environment }}" = "prod" ] && [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "::error::prod can only be deployed from a tag (selected ref: ${{ github.ref_name }})"
+            exit 1
+          fi
+          echo "Ref check passed."
+
+  build:
+    needs: validate-ref
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ inputs.environment }}
+    outputs:
+      artifact-name: ${{ steps.name.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out artifact name
+        id: name
+        run: echo "artifact=demo-app-${ENVIRONMENT}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Create deployment artifact
+        run: |
+          mkdir -p out
+          {
+            echo "environment: ${ENVIRONMENT}"
+            echo "ref:         ${GITHUB_REF_NAME} (${GITHUB_REF_TYPE})"
+            echo "commit:      ${GITHUB_SHA}"
+            echo "built_by:    ${GITHUB_ACTOR}"
+            echo "--- environments/${ENVIRONMENT}/terragrunt.hcl ---"
+            cat "environments/${ENVIRONMENT}/terragrunt.hcl"
+          } > "out/${{ steps.name.outputs.artifact }}.txt"
+          cat "out/${{ steps.name.outputs.artifact }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: out/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # Required approvers, secrets and variables come from this GitHub Environment.
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: artifact
+
+      - name: Azure login (OIDC)
+        if: ${{ vars.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Show Azure target
+        run: |
+          echo "Subscription: ${{ vars.AZURE_SUBSCRIPTION_ID || '(not configured - demo mode)' }}"
+          echo "Client ID:    ${{ vars.AZURE_CLIENT_ID || '(not configured - demo mode)' }}"
+
+      - name: Deploy (simulated terragrunt)
+        run: |
+          echo "Using artifact: ${{ needs.build.outputs.artifact-name }}"
+          echo "Contents:"
+          cat artifact/*.txt
+          echo
+          echo "Would run: terragrunt apply --terragrunt-working-dir environments/${{ inputs.environment }}"
+          echo "Deployed to ${{ inputs.environment }}."
